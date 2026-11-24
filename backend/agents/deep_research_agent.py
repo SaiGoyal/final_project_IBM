@@ -282,12 +282,27 @@ Write the report:
                 )
                 clients_to_try.append(fallback_client)
 
+        def _to_text(c: Any) -> str:
+            if isinstance(c, str):
+                return c
+            elif isinstance(c, list):
+                return "".join(
+                    item if isinstance(item, str) else (item.get("text", "") if isinstance(item, dict) else str(item))
+                    for item in c
+                )
+            elif isinstance(c, dict) and "text" in c:
+                return str(c["text"])
+            elif c is not None:
+                return str(c)
+            return ""
+
         last_error = None
         for client in clients_to_try:
             if hasattr(client, "astream"):
                 try:
                     async for chunk in client.astream(prompt):
-                        content = chunk.content if hasattr(chunk, "content") else str(chunk)
+                        raw_c = chunk.content if hasattr(chunk, "content") else chunk
+                        content = _to_text(raw_c)
                         if content:
                             yield content
                     return
@@ -298,7 +313,8 @@ Write the report:
             if hasattr(client, "stream"):
                 try:
                     for chunk in client.stream(prompt):
-                        content = chunk.content if hasattr(chunk, "content") else str(chunk)
+                        raw_c = chunk.content if hasattr(chunk, "content") else chunk
+                        content = _to_text(raw_c)
                         if content:
                             yield content
                             await asyncio.sleep(0)

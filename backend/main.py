@@ -437,7 +437,15 @@ async def chat_endpoint(req: ChatRequest):
             ):
                 # Collect assistant text for memory storage
                 if item.get("event") == "answer_chunk":
-                    full_assistant_response.append(item.get("chunk", ""))
+                    chunk_val = item.get("chunk", "")
+                    if isinstance(chunk_val, list):
+                        chunk_val = "".join(
+                            c if isinstance(c, str) else (c.get("text", "") if isinstance(c, dict) else str(c))
+                            for c in chunk_val
+                        )
+                    elif not isinstance(chunk_val, str):
+                        chunk_val = str(chunk_val)
+                    full_assistant_response.append(chunk_val)
                 yield f"data: {json.dumps(item)}\n\n"
                 await asyncio.sleep(0.01)
 
@@ -449,7 +457,7 @@ async def chat_endpoint(req: ChatRequest):
 
         # ── Persist assistant turn + maybe update long-term memory ─────────
         if full_assistant_response:
-            assistant_text = "".join(full_assistant_response)
+            assistant_text = "".join(str(s) for s in full_assistant_response)
             await memory_manager.add_turn(session_id, "assistant", assistant_text[:1500])
             # Non-blocking: update long-term profile if threshold reached
             asyncio.create_task(
@@ -471,6 +479,25 @@ async def clear_memory(session_id: str):
     """Clear short-term memory for a session (e.g. 'New Chat' button)."""
     await memory_manager.clear_session(session_id)
     return {"status": "cleared", "session_id": session_id}
+
+
+# ── Serve Built Frontend SPA (if present in container) ───────────────────────────
+frontend_dist = settings.BASE_DIR / "frontend" / "dist"
+if frontend_dist.exists():
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+
+    if (frontend_dist / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        file_path = frontend_dist / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(frontend_dist / "index.html")
 
 
 if __name__ == "__main__":
